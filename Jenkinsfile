@@ -8,7 +8,6 @@ pipeline {
         TAG = "${BUILD_NUMBER}"
 
         JFROG_URL = "http://40.85.219.31:8082/artifactory/maven-local"
-
     }
 
     stages {
@@ -93,7 +92,7 @@ pipeline {
                     sh '''
                     curl -u $JFROG_USER:$JFROG_PASS \
                     -T target/*.jar \
-                    "$JFROG_URL/artifactory/maven-local/"
+                    "$JFROG_URL/"
                     '''
                 }
             }
@@ -136,6 +135,9 @@ spec:
                     sh '''
                     kubectl apply -f deployment.yaml
                     kubectl apply -f service.yaml
+
+                    kubectl get deployments
+                    kubectl get svc
                     kubectl get pods
                     '''
                 }
@@ -148,7 +150,7 @@ spec:
 
                 kubernetes {
 
-                    defaultContainer 'curl'
+                    defaultContainer 'kubectl'
 
                     yaml '''
 apiVersion: v1
@@ -157,9 +159,9 @@ kind: Pod
 spec:
   containers:
 
-  - name: curl
+  - name: kubectl
 
-    image: curlimages/curl:latest
+    image: bitnami/kubectl:latest
 
     command:
     - sleep
@@ -174,14 +176,17 @@ spec:
 
             steps {
 
-                container('curl') {
+                container('kubectl') {
 
                     sh '''
+                    echo "Waiting for pods to become ready..."
+
                     sleep 30
 
                     kubectl get pods
+                    kubectl get svc
 
-                    curl http://springboot-service
+                    kubectl rollout status deployment/springboot-app
                     '''
                 }
             }
@@ -232,8 +237,8 @@ spec:
                 container('kubectl') {
 
                     sh '''
-                    kubectl delete -f deployment.yaml
-                    kubectl delete -f service.yaml
+                    kubectl delete -f deployment.yaml --ignore-not-found=true
+                    kubectl delete -f service.yaml --ignore-not-found=true
                     '''
                 }
             }
