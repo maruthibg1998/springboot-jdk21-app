@@ -7,7 +7,7 @@ pipeline {
         IMAGE_NAME = "pavankumarch1219/springboot-jdk21-app"
         TAG = "${BUILD_NUMBER}"
 
-        JFROG_URL = "http://40.85.219.31:8082"
+        JFROG_URL = "http://40.85.219.31:8082/artifactory/maven-local"
 
     }
 
