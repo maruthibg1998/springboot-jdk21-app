@@ -23,5 +23,7 @@ spec:
 
         image: pavankumarch1219/springboot-jdk21-app:latest
 
+        imagePullPolicy: Always
+
         ports:
         - containerPort: 8080
