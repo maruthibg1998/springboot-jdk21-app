@@ -21,7 +21,7 @@ spec:
 
       - name: springboot-app
 
-        image: YOUR_DOCKERHUB_USERNAME/springboot-jdk21-app:latest
+        image: pavankumarch1219/springboot-jdk21-app:latest
 
         ports:
         - containerPort: 8080
