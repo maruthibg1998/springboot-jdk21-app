@@ -1,6 +1,6 @@
 pipeline {
 
-    agent none
+    agent any
 
     environment {
 
@@ -8,26 +8,23 @@ pipeline {
         TAG = "${BUILD_NUMBER}"
 
         JFROG_URL = "http://40.85.219.31:8082/artifactory/maven-local"
-
-        APP_NAME = "springboot-app"
     }
 
     stages {
 
-        stage('Build Maven Artifact') {
-
-            agent {
-                docker {
-                    image 'maven:3.9.8-eclipse-temurin-21'
-                    args '-v /root/.m2:/root/.m2'
-                    reuseNode true
-                }
-            }
+        stage('Checkout Code') {
 
             steps {
 
                 git branch: 'main',
+                credentialsId: 'github-creds',
                 url: 'https://github.com/pavankumarch1219/springboot-jdk21-app.git'
+            }
+        }
+
+        stage('Build Maven Artifact') {
+
+            steps {
 
                 sh '''
                 mvn clean package -DskipTests
@@ -41,17 +38,11 @@ pipeline {
 
         stage('Run Tests') {
 
-            agent {
-                docker {
-                    image 'maven:3.9.8-eclipse-temurin-21'
-                    args '-v /root/.m2:/root/.m2'
-                    reuseNode true
-                }
-            }
-
             steps {
 
-                sh 'mvn test'
+                sh '''
+                mvn test
+                '''
             }
 
             post {
@@ -63,46 +54,40 @@ pipeline {
             }
         }
 
-        stage('Build & Push Docker Image') {
-
-            agent {
-                docker {
-                    image 'docker:27-cli'
-                    args '-v /var/run/docker.sock:/var/run/docker.sock'
-                    reuseNode true
-                }
-            }
+        stage('Build Docker Image') {
 
             steps {
 
-                script {
+                sh '''
+                docker build -t ${IMAGE_NAME}:${TAG} .
+
+                docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+
+            steps {
+
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
 
                     sh '''
-                    docker version
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+                    docker push ${IMAGE_NAME}:${TAG}
+
+                    docker push ${IMAGE_NAME}:latest
                     '''
-
-                    sh '''
-                    docker build -t ${IMAGE_NAME}:${TAG} .
-                    '''
-
-                    docker.withRegistry('', 'docker-creds') {
-
-                        docker.image("${IMAGE_NAME}:${TAG}").push()
-
-                        docker.image("${IMAGE_NAME}:${TAG}").push("latest")
-                    }
                 }
             }
         }
 
-        stage('Upload to JFrog') {
-
-            agent {
-                docker {
-                    image 'maven:3.9.8-eclipse-temurin-21'
-                    reuseNode true
-                }
-            }
+        stage('Upload JAR to JFrog') {
 
             steps {
 
@@ -113,8 +98,6 @@ pipeline {
                 )]) {
 
                     sh '''
-                    echo "Uploading JAR to JFrog..."
-
                     curl -v -u $JFROG_USER:$JFROG_PASS \
                     -T springboot.jar \
                     "$JFROG_URL/springboot-${BUILD_NUMBER}.jar"
@@ -125,167 +108,53 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
 
-            agent {
-
-                kubernetes {
-
-                    defaultContainer 'kubectl'
-
-                    yaml '''
-apiVersion: v1
-kind: Pod
-
-spec:
-  serviceAccountName: default
-
-  containers:
-
-  - name: kubectl
-    image: bitnami/kubectl:latest
-
-    command:
-    - sleep
-
-    args:
-    - "99d"
-
-    tty: true
-'''
-                }
-            }
-
             steps {
 
-                container('kubectl') {
+                sh '''
+                kubectl apply -f deployment.yaml
 
-                    sh '''
-                    kubectl version --client
+                kubectl apply -f service.yaml
 
-                    kubectl apply -f deployment.yaml
+                kubectl get deployments
 
-                    kubectl apply -f service.yaml
+                kubectl get pods
 
-                    kubectl get deployments
-
-                    kubectl get svc
-
-                    kubectl get pods
-                    '''
-                }
+                kubectl get svc
+                '''
             }
         }
 
         stage('Validate Deployment') {
 
-            agent {
-
-                kubernetes {
-
-                    defaultContainer 'kubectl'
-
-                    yaml '''
-apiVersion: v1
-kind: Pod
-
-spec:
-  serviceAccountName: default
-
-  containers:
-
-  - name: kubectl
-    image: bitnami/kubectl:latest
-
-    command:
-    - sleep
-
-    args:
-    - "99d"
-
-    tty: true
-'''
-                }
-            }
-
             steps {
 
-                container('kubectl') {
+                sh '''
+                kubectl rollout status deployment/springboot-app --timeout=180s
 
-                    sh '''
-                    echo "Waiting for application startup..."
+                kubectl get pods
 
-                    sleep 40
-
-                    kubectl get pods
-
-                    kubectl get svc
-
-                    kubectl rollout status deployment/${APP_NAME}
-
-                    kubectl port-forward svc/springboot-service 8080:8080 > /dev/null 2>&1 &
-
-                    sleep 10
-
-                    curl http://localhost:8080
-                    '''
-                }
+                kubectl get svc
+                '''
             }
         }
 
         stage('Approval Gate') {
 
-            agent none
-
             steps {
 
-                input message: 'Approve Destroy Stage?'
+                input message: 'Approve Cleanup Stage?'
             }
         }
 
-        stage('Destroy & Cleanup') {
-
-            agent {
-
-                kubernetes {
-
-                    defaultContainer 'kubectl'
-
-                    yaml '''
-apiVersion: v1
-kind: Pod
-
-spec:
-  serviceAccountName: default
-
-  containers:
-
-  - name: kubectl
-    image: bitnami/kubectl:latest
-
-    command:
-    - sleep
-
-    args:
-    - "99d"
-
-    tty: true
-'''
-                }
-            }
+        stage('Destroy Deployment') {
 
             steps {
 
-                container('kubectl') {
+                sh '''
+                kubectl delete -f deployment.yaml --ignore-not-found=true
 
-                    sh '''
-                    kubectl delete -f deployment.yaml --ignore-not-found=true
-
-                    kubectl delete -f service.yaml --ignore-not-found=true
-
-                    kubectl get pods
-
-                    kubectl get svc
-                    '''
-                }
+                kubectl delete -f service.yaml --ignore-not-found=true
+                '''
             }
         }
     }
