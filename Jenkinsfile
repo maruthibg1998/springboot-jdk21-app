@@ -8,6 +8,8 @@ pipeline {
         TAG = "${BUILD_NUMBER}"
 
         JFROG_URL = "http://40.85.219.31:8082/artifactory/maven-local"
+
+        APP_NAME = "springboot-app"
     }
 
     stages {
@@ -18,6 +20,7 @@ pipeline {
                 docker {
                     image 'maven:3.9.8-eclipse-temurin-21'
                     args '-v /root/.m2:/root/.m2'
+                    reuseNode true
                 }
             }
 
@@ -26,7 +29,13 @@ pipeline {
                 git branch: 'main',
                 url: 'https://github.com/pavankumarch1219/springboot-jdk21-app.git'
 
-                sh 'mvn clean package -DskipTests'
+                sh '''
+                mvn clean package -DskipTests
+
+                cp target/*.jar springboot.jar
+
+                ls -lrt
+                '''
             }
         }
 
@@ -36,6 +45,7 @@ pipeline {
                 docker {
                     image 'maven:3.9.8-eclipse-temurin-21'
                     args '-v /root/.m2:/root/.m2'
+                    reuseNode true
                 }
             }
 
@@ -55,13 +65,25 @@ pipeline {
 
         stage('Build & Push Docker Image') {
 
-            agent any
+            agent {
+                docker {
+                    image 'docker:27-cli'
+                    args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
 
             steps {
 
                 script {
 
-                    docker.build("${IMAGE_NAME}:${TAG}")
+                    sh '''
+                    docker version
+                    '''
+
+                    sh '''
+                    docker build -t ${IMAGE_NAME}:${TAG} .
+                    '''
 
                     docker.withRegistry('', 'docker-creds') {
 
@@ -78,6 +100,7 @@ pipeline {
             agent {
                 docker {
                     image 'maven:3.9.8-eclipse-temurin-21'
+                    reuseNode true
                 }
             }
 
@@ -90,9 +113,11 @@ pipeline {
                 )]) {
 
                     sh '''
-                    curl -u $JFROG_USER:$JFROG_PASS \
-                    -T target/*.jar \
-                    "$JFROG_URL/"
+                    echo "Uploading JAR to JFrog..."
+
+                    curl -v -u $JFROG_USER:$JFROG_PASS \
+                    -T springboot.jar \
+                    "$JFROG_URL/springboot-${BUILD_NUMBER}.jar"
                     '''
                 }
             }
@@ -111,10 +136,11 @@ apiVersion: v1
 kind: Pod
 
 spec:
+  serviceAccountName: default
+
   containers:
 
   - name: kubectl
-
     image: bitnami/kubectl:latest
 
     command:
@@ -133,11 +159,16 @@ spec:
                 container('kubectl') {
 
                     sh '''
+                    kubectl version --client
+
                     kubectl apply -f deployment.yaml
+
                     kubectl apply -f service.yaml
 
                     kubectl get deployments
+
                     kubectl get svc
+
                     kubectl get pods
                     '''
                 }
@@ -157,10 +188,11 @@ apiVersion: v1
 kind: Pod
 
 spec:
+  serviceAccountName: default
+
   containers:
 
   - name: kubectl
-
     image: bitnami/kubectl:latest
 
     command:
@@ -179,14 +211,21 @@ spec:
                 container('kubectl') {
 
                     sh '''
-                    echo "Waiting for pods to become ready..."
+                    echo "Waiting for application startup..."
 
-                    sleep 30
+                    sleep 40
 
                     kubectl get pods
+
                     kubectl get svc
 
-                    kubectl rollout status deployment/springboot-app
+                    kubectl rollout status deployment/${APP_NAME}
+
+                    kubectl port-forward svc/springboot-service 8080:8080 > /dev/null 2>&1 &
+
+                    sleep 10
+
+                    curl http://localhost:8080
                     '''
                 }
             }
@@ -215,10 +254,11 @@ apiVersion: v1
 kind: Pod
 
 spec:
+  serviceAccountName: default
+
   containers:
 
   - name: kubectl
-
     image: bitnami/kubectl:latest
 
     command:
@@ -238,7 +278,12 @@ spec:
 
                     sh '''
                     kubectl delete -f deployment.yaml --ignore-not-found=true
+
                     kubectl delete -f service.yaml --ignore-not-found=true
+
+                    kubectl get pods
+
+                    kubectl get svc
                     '''
                 }
             }
