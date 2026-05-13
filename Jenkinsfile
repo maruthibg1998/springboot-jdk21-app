@@ -1,21 +1,21 @@
 pipeline {
 
-    agent any
+    agent {
+        kubernetes {
+            inheritFrom 'jnlp'
+        }
+    }
 
     environment {
-
         IMAGE_NAME = "maruthibg1998/springboot-jdk21-app"
         TAG = "${BUILD_NUMBER}"
-
-        JFROG_URL = "http://20.249.148.1:8082/"
+        JFROG_URL = "http://20.249.148.1:8081/artifactory/maven-repo"
     }
 
     stages {
 
         stage('Checkout Code') {
-
             steps {
-
                 git branch: 'main',
                 credentialsId: 'github_creds',
                 url: 'https://github.com/maruthibg1998/springboot-jdk21-app.git'
@@ -23,82 +23,38 @@ pipeline {
         }
 
         stage('Build Maven Artifact') {
-
             steps {
-
-                sh '''
-                mvn clean package -DskipTests
-
-                cp target/*.jar springboot.jar
-
-                ls -lrt
-                '''
-            }
-        }
-
-        stage('Run Tests') {
-
-            steps {
-
-                sh '''
-                mvn test
-                '''
-            }
-
-            post {
-
-                always {
-
-                    junit 'target/surefire-reports/*.xml'
-                }
-            }
-        }
-
-        stage('Build Docker Image') {
-
-            steps {
-
-                sh '''
-                docker build -t ${IMAGE_NAME}:${TAG} .
-
-                docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
-                '''
-            }
-        }
-
-        stage('Push Docker Image') {
-
-            steps {
-
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker_creds',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-
+                container('maven') {
                     sh '''
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-
-                    docker push ${IMAGE_NAME}:${TAG}
-
-                    docker push ${IMAGE_NAME}:latest
+                    mvn clean package -DskipTests
+                    cp target/*.jar springboot.jar
                     '''
                 }
             }
         }
 
-        stage('Upload JAR to JFrog') {
-
+        stage('Run Tests') {
             steps {
+                container('maven') {
+                    sh 'mvn test'
+                }
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
 
+        stage('Upload JAR to JFrog') {
+            steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'jfrog_creds',
                     usernameVariable: 'JFROG_USER',
                     passwordVariable: 'JFROG_PASS'
                 )]) {
-
                     sh '''
-                    curl -v -u $JFROG_USER:$JFROG_PASS \
+                    curl -u $JFROG_USER:$JFROG_PASS \
                     -T springboot.jar \
                     "$JFROG_URL/springboot-${BUILD_NUMBER}.jar"
                     '''
@@ -107,72 +63,36 @@ pipeline {
         }
 
         stage('Deploy to Kubernetes') {
-
             steps {
-
-                sh '''
-                kubectl apply -f deployment.yaml
-
-                kubectl apply -f service.yaml
-
-                kubectl get deployments
-
-                kubectl get pods
-
-                kubectl get svc
-                '''
+                container('kubectl') {
+                    sh '''
+                    kubectl apply -f deployment.yaml
+                    kubectl apply -f service.yaml
+                    '''
+                }
             }
         }
 
         stage('Validate Deployment') {
-
             steps {
-
-                sh '''
-                kubectl rollout status deployment/springboot-app --timeout=180s
-
-                kubectl get pods
-
-                kubectl get svc
-                '''
-            }
-        }
-
-        stage('Approval Gate') {
-
-            steps {
-
-                input message: 'Approve Cleanup Stage?'
-            }
-        }
-
-        stage('Destroy Deployment') {
-
-            steps {
-
-                sh '''
-                kubectl delete -f deployment.yaml --ignore-not-found=true
-
-                kubectl delete -f service.yaml --ignore-not-found=true
-                '''
+                container('kubectl') {
+                    sh '''
+                    kubectl rollout status deployment/springboot-app --timeout=180s
+                    kubectl get pods
+                    '''
+                }
             }
         }
     }
 
     post {
-
         always {
-
             cleanWs()
         }
-
         success {
-
             echo 'Pipeline Executed Successfully'
         }
-
         failure {
-
             echo 'Pipeline Failed'
         }
     }
