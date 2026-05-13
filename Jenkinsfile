@@ -4,10 +4,10 @@ pipeline {
 
     environment {
 
-        IMAGE_NAME = "pavankumarch1219/springboot-jdk21-app"
+        IMAGE_NAME = "maruthibg1998/springboot-jdk21-app"
         TAG = "${BUILD_NUMBER}"
 
-        JFROG_URL = "http://40.85.219.31:8082/artifactory/maven-local"
+        JFROG_URL = "http://20.249.148.1:8082/"
     }
 
     stages {
@@ -17,8 +17,8 @@ pipeline {
             steps {
 
                 git branch: 'main',
-                credentialsId: 'github-creds',
-                url: 'https://github.com/pavankumarch1219/springboot-jdk21-app.git'
+                credentialsId: 'github_creds',
+                url: 'https://github.com/maruthibg1998/springboot-jdk21-app.git'
             }
         }
 
@@ -71,7 +71,7 @@ pipeline {
             steps {
 
                 withCredentials([usernamePassword(
-                    credentialsId: 'docker-creds',
+                    credentialsId: 'docker_creds',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
@@ -92,7 +92,7 @@ pipeline {
             steps {
 
                 withCredentials([usernamePassword(
-                    credentialsId: 'jfrog-creds',
+                    credentialsId: 'jfrog_creds',
                     usernameVariable: 'JFROG_USER',
                     passwordVariable: 'JFROG_PASS'
                 )]) {
